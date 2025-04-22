@@ -9,6 +9,9 @@ var videoElement;
 // 绿幕容差
 let tolerance = 73;
 
+// 抗锯齿强度
+let antiAliasingStrength = 60;
+
 // 数字人主体坐标
 let xOffset = 0;
 let yOffset = 0;
@@ -199,15 +202,13 @@ function drawFrame() {
         }
     }
 
+    // 边缘抗锯齿处理
+    if (antiAliasingStrength > 0) {
+        applyAntiAliasing(imageData, canvas.width, canvas.height, antiAliasingStrength);
+    }
+
     // 将处理后的像素数据放回 canvas
     ctx.putImageData(imageData, 0, 0);
-
-    // 边缘处理
-    // ctx.globalCompositeOperation = 'destination - in';
-    // ctx.filter = 'blur(2px)';
-    // ctx.drawImage(canvas, 0, 0);
-    // ctx.globalCompositeOperation = 'source - over';
-    // ctx.filter = 'none';
 
     // 控制数字人主体坐标
     if (xOffset!== 0 || yOffset!== 0) {
@@ -222,6 +223,74 @@ function drawFrame() {
 
     // 继续绘制下一帧
     requestAnimationFrame(drawFrame);
+}
+
+// 边缘抗锯齿处理的改进版本
+function applyAntiAliasing(imageData, width, height, strength) {
+    if (strength <= 0) return imageData; // 如果强度为0，不做任何处理
+    
+    const data = imageData.data;
+    const tempData = new Uint8ClampedArray(data); // 创建副本避免处理过程中的干扰
+    
+    // 边缘检测和平滑化
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const index = (y * width + x) * 4;
+            if (data[index + 3] > 0) { // 只处理不完全透明的像素
+                // 检查周围像素
+                let transparentNeighbors = 0;
+                let totalAlpha = 0;
+                let countNeighbors = 0;
+                
+                const neighbors = [
+                    [-1, -1], [-1, 0], [-1, 1],
+                    [0, -1],           [0, 1],
+                    [1, -1],  [1, 0],  [1, 1]
+                ];
+                
+                for (const [dx, dy] of neighbors) {
+                    const nx = x + dx;
+                    const ny = y + dy;
+                    if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                        const neighborIndex = (ny * width + nx) * 4;
+                        countNeighbors++;
+                        
+                        if (data[neighborIndex + 3] === 0) {
+                            transparentNeighbors++;
+                        } else {
+                            totalAlpha += data[neighborIndex + 3];
+                        }
+                    }
+                }
+                
+                // 边缘像素处理 - 使用加权平均法平滑边缘
+                if (transparentNeighbors > 0) {
+                    // 计算新的透明度 - 结合当前透明度和邻居平均透明度
+                    const avgAlpha = countNeighbors > 0 ? totalAlpha / (countNeighbors - transparentNeighbors) : 0;
+                    const currentAlpha = data[index + 3];
+                    
+                    // 根据透明邻居数量和抗锯齿强度调整当前像素的透明度
+                    // 强度越高，边缘越平滑但可能更模糊
+                    const blendFactor = (transparentNeighbors / 8) * (strength / 30);
+                    const newAlpha = Math.max(0, currentAlpha * (1 - blendFactor));
+                    
+                    tempData[index + 3] = newAlpha;
+                }
+            }
+        }
+    }
+    
+    // 将处理后的数据复制回原始数组
+    for (let i = 0; i < data.length; i++) {
+        data[i] = tempData[i];
+    }
+    
+    return imageData;
+}
+
+// 示例：调整抗锯齿强度
+function adjustAntiAliasingStrength(newStrength) {
+    antiAliasingStrength = newStrength;
 }
 
 function stop() {
